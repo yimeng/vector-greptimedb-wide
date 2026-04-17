@@ -18,11 +18,17 @@ pub struct GreptimeDBGrpcRequest {
     pub(super) items: RowInsertRequests,
     pub(super) finalizers: EventFinalizers,
     pub(super) metadata: RequestMetadata,
+    pub(super) dbname: String,
 }
 
 impl GreptimeDBGrpcRequest {
     // convert metrics event to GreptimeDBGrpcRequest
-    pub(super) fn from_metrics(metrics: Vec<Metric>, options: &WideRequestBuilderOptions) -> Self {
+    pub(super) fn from_metrics(
+        metrics: Vec<Metric>,
+        options: &WideRequestBuilderOptions,
+        dbname: &str,
+        table_template: Option<&Template>,
+    ) -> Self {
         let mut items = Vec::with_capacity(metrics.len());
         let mut finalizers = EventFinalizers::default();
         let mut request_metadata_builder = RequestMetadataBuilder::default();
@@ -35,7 +41,21 @@ impl GreptimeDBGrpcRequest {
 
             request_metadata_builder.track_event(metric.clone());
 
-            items.push(metric_to_wide_insert_request(metric, options));
+            let table_override = table_template.and_then(|tmpl| {
+                let event = Event::from(metric.clone());
+                match tmpl.render_string(&event) {
+                    Ok(name) => Some(name),
+                    Err(error) => {
+                        emit!(TemplateRenderingError {
+                            error,
+                            field: Some("table"),
+                            drop_event: false,
+                        });
+                        None
+                    }
+                }
+            });
+            items.push(metric_to_wide_insert_request(metric, options, table_override.as_deref()));
         }
 
         let request_size =
@@ -45,6 +65,7 @@ impl GreptimeDBGrpcRequest {
             items: RowInsertRequests { inserts: items },
             finalizers,
             metadata: request_metadata_builder.with_request_size(request_size),
+            dbname: dbname.to_owned(),
         }
     }
 }
