@@ -2,7 +2,7 @@ use vector_lib::{configurable::configurable_component, sensitive_string::Sensiti
 
 use crate::sinks::{
     greptimedb::{
-        GreptimeDBDefaultBatchSettings, default_dbname,
+        GreptimeDBDefaultBatchSettings, default_dbname_template,
         wide_metrics::{
             request::GreptimeDBGrpcRetryLogic,
             request_builder::WideRequestBuilderOptions,
@@ -22,10 +22,11 @@ pub struct GreptimeDBWideMetricsConfig {
     /// The [GreptimeDB database][database] name to connect.
     ///
     /// Default to `public`, the default database of GreptimeDB.
+    /// Supports template syntax to extract dbname from event fields.
     #[configurable(metadata(docs::examples = "public"))]
-    #[derivative(Default(value = "default_dbname()"))]
-    #[serde(default = "default_dbname")]
-    pub dbname: String,
+    #[derivative(Default(value = "default_dbname_template()"))]
+    #[serde(default = "default_dbname_template")]
+    pub dbname: Template,
     /// The host and port of GreptimeDB gRPC service.
     #[configurable(metadata(docs::examples = "example.com:4001"))]
     pub endpoint: String,
@@ -82,6 +83,12 @@ pub struct GreptimeDBWideMetricsConfig {
     #[configurable(metadata(docs::examples = "tag"))]
     #[serde(default)]
     pub fallback_behavior: Option<String>,
+
+    /// Optional table name template. If provided, overrides the default `{ns}_{metric_name}` format.
+    /// Supports template syntax to extract table name from event fields.
+    #[configurable(metadata(docs::examples = "{{ tags.task_instance_id }}_{{ metric.name }}"))]
+    #[serde(default)]
+    pub table: Option<Template>,
 }
 
 impl_generate_config_from_default!(GreptimeDBWideMetricsConfig);
@@ -97,11 +104,15 @@ impl SinkConfig for GreptimeDBWideMetricsConfig {
         let sink = sink::GreptimeDBWideGrpcSink {
             service,
             batch_settings: self.batch.into_batcher_settings()?,
+            dbname: self.dbname.clone(),
+            
             request_builder_options: WideRequestBuilderOptions {
                 use_new_naming: self.new_naming.unwrap_or(false),
                 tag_columns: self.tag_columns.clone(),
                 tag_column_patterns: self.tag_column_patterns.clone(),
                 fallback_behavior: self.fallback_behavior.clone(),
+                table: self.table.clone(),
+                
             },
         };
 

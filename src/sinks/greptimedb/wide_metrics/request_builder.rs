@@ -9,12 +9,17 @@ use vector_lib::{
 };
 
 use crate::sinks::util::statistic::DistributionStatistic;
+use crate::template::Template;
+use crate::internal_events::TemplateRenderingError;
+use vector_lib::event::Event;
 
+#[derive(Clone)]
 pub(super) struct WideRequestBuilderOptions {
     pub(super) use_new_naming: bool,
     pub(super) tag_columns: Vec<String>,
     pub(super) tag_column_patterns: Vec<String>,
     pub(super) fallback_behavior: Option<String>,
+    pub(super) table: Option<Template>,
 }
 
 pub(super) const DISTRIBUTION_QUANTILES: [f64; 5] = [0.5, 0.75, 0.90, 0.95, 0.99];
@@ -39,12 +44,33 @@ pub fn metric_to_wide_insert_request(
     metric: Metric,
     options: &WideRequestBuilderOptions,
 ) -> RowInsertRequest {
-    let ns = metric.namespace();
-    let metric_name = metric.name();
-    let table_name = if let Some(ns) = ns {
-        format!("{ns}_{metric_name}")
+    let table_name = if let Some(ref tmpl) = options.table {
+        let event = Event::from(metric.clone());
+        match tmpl.render_string(&event) {
+            Ok(name) => name,
+            Err(error) => {
+                emit!(TemplateRenderingError {
+                    error,
+                    field: Some("table"),
+                    drop_event: false,
+                });
+                let ns = metric.namespace();
+                let metric_name = metric.name();
+                if let Some(ns) = ns {
+                    format!("{ns}_{metric_name}")
+                } else {
+                    metric_name.to_owned()
+                }
+            }
+        }
     } else {
-        metric_name.to_owned()
+        let ns = metric.namespace();
+        let metric_name = metric.name();
+        if let Some(ns) = ns {
+            format!("{ns}_{metric_name}")
+        } else {
+            metric_name.to_owned()
+        }
     };
     let mut schema = Vec::new();
     let mut columns = Vec::new();
@@ -341,6 +367,7 @@ mod tests {
             tag_columns: vec![],
             tag_column_patterns: vec![],
             fallback_behavior: None,
+            table: None,
         };
 
         let insert = metric_to_wide_insert_request(metric, &options);
@@ -379,6 +406,7 @@ mod tests {
             tag_columns: vec!["task_instance_id".to_owned(), "host".to_owned()],
             tag_column_patterns: vec![],
             fallback_behavior: None,
+            table: None,
         };
 
         let insert = metric_to_wide_insert_request(metric, &options);
@@ -426,6 +454,7 @@ mod tests {
             tag_columns: vec!["task_instance_id".to_owned()],
             tag_column_patterns: vec!["^aocs_.*".to_owned()],
             fallback_behavior: None,
+            table: None,
         };
 
         let insert = metric_to_wide_insert_request(metric, &options);
@@ -467,6 +496,7 @@ mod tests {
             tag_columns: vec!["task_instance_id".to_owned()],
             tag_column_patterns: vec![],
             fallback_behavior: Some("drop".to_owned()),
+            table: None,
         };
 
         let insert = metric_to_wide_insert_request(metric, &options);
@@ -490,6 +520,7 @@ mod tests {
             tag_columns: vec![],
             tag_column_patterns: vec![],
             fallback_behavior: None,
+            table: None,
         };
 
         let insert = metric_to_wide_insert_request(metric, &options);

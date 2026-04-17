@@ -18,11 +18,16 @@ pub struct GreptimeDBGrpcRequest {
     pub(super) items: RowInsertRequests,
     pub(super) finalizers: EventFinalizers,
     pub(super) metadata: RequestMetadata,
+    pub(super) dbname: String,
 }
 
 impl GreptimeDBGrpcRequest {
     // convert metrics event to GreptimeDBGrpcRequest
-    pub(super) fn from_metrics(metrics: Vec<Metric>, options: &WideRequestBuilderOptions) -> Self {
+    pub(super) fn from_metrics(
+        metrics: Vec<Metric>,
+        options: &WideRequestBuilderOptions,
+        dbname: &str,
+    ) -> Self {
         let mut items = Vec::with_capacity(metrics.len());
         let mut finalizers = EventFinalizers::default();
         let mut request_metadata_builder = RequestMetadataBuilder::default();
@@ -45,6 +50,7 @@ impl GreptimeDBGrpcRequest {
             items: RowInsertRequests { inserts: items },
             finalizers,
             metadata: request_metadata_builder.with_request_size(request_size),
+            dbname: dbname.to_owned(),
         }
     }
 }
